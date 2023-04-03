@@ -1,0 +1,181 @@
+---
+title: RDS_ICA
+author: B222908
+output:
+  word_document
+date: "2022-11-10"
+---
+
+```{r setup,  include = FALSE}
+knitr::opts_chunk$set(echo  =  TRUE)
+```
+
+## Import and check data content. Make required genes list unique.
+
+```{r}
+# import data
+data_all <- read.csv("data_all.csv")
+gene_list <- read.csv("genelist_23.txt")
+gene_anno <- read.csv("gene_annotation.csv")
+sample_anno <- read.csv("sample_annotation.csv")
+data_all<-as.data.frame(data_all)
+
+# check if experssion levels in data_all are positive. If not, terminate script
+for(i in 1:nrow(data_all)){
+  for(k in 1:ncol(data_all)){
+    if(data_all[i,k]<0){
+      stop("experssion level must be positive number")
+      }
+  }
+}
+
+# check if data_all has duplicated rows and unique it
+if (ncol(data_all[duplicated(data_all)]) != 0) {
+  data_all<-unique(data_all)
+  }
+# check if the rows of data_all in order and sort it
+if (TRUE %in% (sort(data_all$X) != data_all$X)) {
+  data_all<-data_all[order(data_all$X),]
+}
+
+# check if gene annotation contain all genes. If not, terminate script
+if (FALSE %in% c(data_all$X %in% gene_anno$X)) {
+  stop("missing annotation for genes")
+}
+# check if sample annotation contain all samples. If not, terminate script
+if (FALSE %in% c(colnames(data_all)[2:ncol(data_all)] 
+                 %in% sample_anno$SampleName)){
+  stop("missing annotation for samples")
+  }
+
+# remove duplicate genes in required gene list and sort them in order
+gene_x <- unique(sort(as.vector(gene_list$x)))
+gene_x # print out required genes
+
+```
+
+## Log the expression value and add long name and gene type in the data frame. Print out head of log_data.
+
+```{r}
+# log the expression,  remove x column
+log_data <- log(data_all)
+log_data$X <- data_all$X  # change the X column back to normal
+log_data[log_data == -Inf] <- 0  # change the -Inf value into 0
+
+# add new columns of gene types and gene long names in a conservative way
+log_data$type=NA
+log_data$LongName=NA
+for (i in 1:length(log_data$X)){
+  # type of gene
+  log_data$type[i] <- gene_anno$Type[gene_anno$X==log_data$X[i]]
+  # match gene names with long name
+  log_data$LongName[i] <- gene_anno$LongName[gene_anno$X==log_data$X[i]]
+}
+head(log_data)
+tail(log_data)
+```
+
+## Draw scatter plot.
+
+```{r}
+
+# plot the samples
+plot_samples<-function(log_data,gene_x){
+# gene types annotation
+type_anno <- cbind(gene_x, log_data$type[gene_x])
+XA <- type_anno[, 1][type_anno[, 2] == "XA"] # required gene names in XA type
+XB <- type_anno[, 1][type_anno[, 2] == "XB"] # required gene names in XB type
+XC <- type_anno[, 1][type_anno[, 2] == "XC"] # required gene names in XC type
+# define color for each sample in plot. Selected distinguished colors
+gene_col <- c("#e6194b",  "#3cb44b",  "#ffe119",  "#4363d8",  "#f58231",
+            "#911eb4",  "#46f0f0",  "#f032e6",  "#bcf60c",  "#fabebe",
+            "#008080",  "#e6beff",  "#9a6324",  "#fffac8",  "#800000",
+            "#aaffc3",  "#808000",  "#ffd8b1",  "#000075",  "#808080")
+# plot gene expressions of sample A in type "XA"
+plot(XA, log_data[XA, 2], col = gene_col[1], xlab = NA,
+     ylab = "log expression", main = "gene expression",
+     cex = 0.8, pch = 0, xaxt = "n",
+     xlim = c(0, gene_x[length(gene_x)] + 20),
+     ylim = c(min(log_data[, 2:(ncol(log_data) - 2)]) - 0.1,
+            max(log_data[, 2:(ncol(log_data) - 2)]) + 0.1))
+# gene expressions of sample A in other two gene types,
+# using different point types(pch)
+points(XB, log_data[XB, 2], col = gene_col[1], cex = 0.8, pch = 1)
+points(XC, log_data[XC, 2], col = gene_col[1], cex = 0.8, pch = 2)
+# long names annotation
+axis(side = 1, at = gene_x, labels = log_data$LongName[gene_x],
+     cex.axis = 0.7, gap.axis  =  0, las = 3)
+# add points of gene expressions from other samples,
+# each sample has different color, each gene type has different point type
+for (i in 3:(ncol(log_data) - 2)){
+  points(XA, log_data[XA, i], col = gene_col[i - 1], cex = 0.8, pch = 0)
+  points(XB, log_data[XB, i], col = gene_col[i - 1], cex = 0.8, pch = 1)
+  points(XC, log_data[XC, i], col = gene_col[i - 1], cex = 0.8, pch = 2)
+}
+# add legend of different samples
+legend(x = gene_x[length(gene_x)] + 5,
+       y = max(log_data[, 2:(ncol(log_data) - 2)]),
+       legend  =  colnames(log_data)[2:(ncol(log_data) - 2)],
+       col = gene_col[1:(ncol(log_data) - 3)], pch = 1, cex  =  0.8)
+# add legend of different gene types
+legend(x = 0, y = max(log_data[, 2:(ncol(log_data) - 2)]) + 0.1,
+       legend  =  c("XA", "XB", "XC"),
+      col = "black", pch = c(0, 1, 2), cex = 0.7, horiz  =  TRUE)
+}
+plot_samples(log_data,gene_x)
+```
+
+## Data processing for drawing heatmap.
+
+```{r}
+library(pheatmap)
+# create data frame that only contains expression values
+exper <- log_data[, 2:(ncol(log_data) - 2)]
+row.names(exper) <- log_data$LongName
+exper <- exper[gene_x, ] # only required genes
+head(exper) # print out the data frame
+```
+
+## Annotations for heatmap.
+
+```{r}
+# gene type annotation of each gene
+gene_type <- data.frame(type = log_data$type) # set a one-column data frame
+row.names(gene_type) <- log_data$LongName # row names are gene long names
+head(gene_type)
+```
+
+```{r}
+# treatment annotation of each sample
+treatment <- data.frame(treatment = sample_anno$TreatmentGroup)
+row.names(treatment) <- sample_anno$SampleName # row names are sample names
+head(treatment)
+```
+
+## Heatmap 1: both the genes and the samples are clustered. We are interesting in the gene expression between samples, so scale equals to "row".
+
+```{r}
+pheatmap(exper, scale = "row", annotation_row  =  gene_type,
+         angle_col = "0", annotation_col  =  treatment,
+         main = "heatmap of gene expression",
+         cluster_rows = TRUE, cluster_cols = TRUE,
+         fontsize_row  =  6, fontsize_col  =  12)
+```
+
+## Heatmap 2: only the genes are clustered. 
+
+```{r}
+pheatmap(exper, scale = "row", annotation_row  =  gene_type,
+         angle_col = "0", annotation_col  =  treatment,
+         main = "heatmap of gene expression",
+         cluster_rows = TRUE, cluster_cols = FALSE,
+         fontsize_row = 6, fontsize_col = 12)
+```
+
+## Outline the interpretation of the heatmap plots
+
+From the sample clustering, we can see that samples that conducted same treatment show similar gene expression patterns. In addition, the expression patterns of treatment 2 and 3 show great similarities, while expression pattern of treatment 4 is significantly different from expression patterns of other groups. 
+
+From the gene type clustering, we can see that genes that are in the same type don't cluster together, which reveals that the expression patterns of genes in same type doesn't necessarily to be similar. Moreover, we can see that some genes shows similar changes across different treatments. The expression of genes significantly changed between treatments can become biomarker, showing the biological changes when those treatments are conducted.
+
+
